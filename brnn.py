@@ -23,7 +23,8 @@ def binary_double_forward_prop(w1, w1_, inp1, b1, w2, w2_, inp2, b2, is_first1=F
     lin2 = binary_linear_step(w2, w2_, inp2, b2, is_first2)
     zmu, zsigma = binary_add_layers(lin1, lin2)
     return binary_nonlinear_step(zmu, zsigma)
-
+def sample_array(arr):
+    return sign(arr - (2*sample(shape(arr))-1))
 
 
 class BRNN(RNN):
@@ -80,4 +81,67 @@ class BRNN(RNN):
         n.aux_= { k : n.prime(n.aux[k])    for k in n.aux_.keys()}
         return n
 
+    def fprop_det(n, ins, init=None, ti=0, tf=None):
+        init, tf, c = init, tf, n.context = zeros((n.recurrent_size,)) if init is None else init, len(ins)-1 if tf is None else tf, Context()
+        a = init
+        for t in xrange(ti, tf+1):
+            c.a[t] = a = sign( sign(n.params['hi']).dot(ins[t]) + sign(n.params['h']).dot(a) + n.params['bi'])
+            c.out[t] = sign( sign(n.params['ho']).dot(a) + n.params['bo'])
+        return n
 
+    def fprop_resample(n, ins, init=None, ti=0, tf=None):
+        init, tf, c = init, tf, n.context = zeros((n.recurrent_size,)) if init is None else init, len(ins)-1 if tf is None else tf, Context()
+        a = init
+        for t in xrange(ti, tf+1):
+            c.a[t] = a = sign( sample_array(n.aux['hi']).dot(ins[t]) + sample_array(n.aux['h']).dot(a) + n.params['bi'])
+            c.out[t] = sign( sample_array(n.aux['ho']).dot(a) + n.params['bo'])
+        return n
+
+    def fprop_per_layer_avg(n, ins, init=None, ti=0, tf=None, reps=1000):
+        init, tf, c = init, tf, n.context = zeros((n.recurrent_size,)) if init is None else init, len(ins)-1 if tf is None else tf, Context()
+        a = init
+        for t in xrange(ti, tf+1):
+            c.a[t] = 0
+            for i in xrange(reps):
+                c.a[t] += sign( sample_array(n.aux['hi']).dot(ins[t]) + sample_array(n.aux['h']).dot(a) + n.params['bi'])
+            c.a[t] = 1.0 * c.a[t] / reps
+            a = c.a[t]
+
+            c.out[t] = 0
+            for i in xrange(reps):
+                c.out[t] += sign( sample_array(n.aux['ho']).dot(a) + n.params['bo'])
+            c.out[t] = 1.0 * c.out[t] / reps
+        return n
+
+
+
+
+    def fprop_single_sample(n, ins, init=None, ti=0, tf=None):
+        init, tf, c = init, tf, n.context = zeros((n.recurrent_size,)) if init is None else init, len(ins)-1 if tf is None else tf, Context()
+        a = init
+        wi = sample_array(n.aux['hi']); w = sample_array(n.aux['h']); wo = sample_array(n.aux['ho'])
+        for t in xrange(ti, tf+1):
+            c.a[t] = a = sign( wi.dot(ins[t]) + w.dot(a) + n.params['bi'])
+            c.out[t] = sign( wo.dot(a) + n.params['bo'])
+        return n
+
+
+    def fprop_multi_resample(n, ins, init=None, ti=0, tf=None, reps=1000):
+        action = lambda: n.fprop_resample(ins, init=None, ti=0, tf=None)
+        out = action().context.out
+        for i in xrange(1,reps):
+            temp_out = action().context.out
+            out = { k : out[k] + temp_out[k] for k in out.keys() }
+        out = { k : 1.0*out[k]/reps for k in out.keys() }
+        n.context.out = out
+        return n
+
+    def fprop_multi_single_sample(n, ins, init=None, ti=0, tf=None, reps=1000):
+        action = lambda: n.fprop_single_sample(ins, init=None, ti=0, tf=None)
+        out = action().context.out
+        for i in xrange(1,reps):
+            temp_out = action().context.out
+            out = { k : out[k] + temp_out[k] for k in out.keys() }
+        out = { k : 1.0*out[k]/reps for k in out.keys() }
+        n.context.out = out
+        return n
