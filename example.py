@@ -69,7 +69,7 @@ def experiment():
 
 def text(fname='aiw.txt', hidden=10, seq_length=10, epochs=10, eta=1, rnn=None, binary=False):
     # Data I/O
-    data = open(fname, 'r').read()  # Use this source file as input for RNN
+    data = open(fname, 'r').read()[:-1]  # Use this source file as input for RNN  #remove trailing newline
     chars = sorted(list(set(data)))
     data_size, vocab_size = len(data), len(chars)
     print('Data has %d characters, %d unique.' % (data_size, vocab_size))
